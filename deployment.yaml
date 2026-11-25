@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-web
+  namespace: staging
+  labels:
+    app: hello-web
+    env: staging
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=Example pins a version tag for readability; pin the image digest in production
+    checkov.io/skip2: CKV_K8S_40=UID 101 is the nginx user shipped by the upstream unprivileged image
+spec:
+  # replicas is intentionally OMITTED: the HPA owns the replica count.
+  # Declaring it here would reset the scale on every `kubectl apply`.
+  revisionHistoryLimit: 6
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # never dip below current capacity during a rollout
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: hello-web
+      env: staging
+  template:
+    metadata:
+      labels:
+        app: hello-web
+        env: staging
+      annotations:
+        # Stateless and PDB-protected: the cluster-autoscaler may consolidate
+        # nodes; the PDB (maxUnavailable: 1) paces how fast that happens.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+    spec:
+      automountServiceAccountToken: false # app never talks to the K8s API
+      terminationGracePeriodSeconds: 45
+      # Modern replacement for pod anti-affinity: keep replicas spread across
+      # zones and nodes (soft, so scheduling never deadlocks on small clusters).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: hello-web
+              env: staging
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: hello-web
+              env: staging
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101 # nginx user of the upstream unprivileged image
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+        appArmorProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hello-web
+          # Unprivileged nginx: listens on 8080, runs as UID 101 — no root, ever.
+          # In production, pin by digest (…@sha256:…) instead of tag.
+          image: nginxinc/nginx-unprivileged:1.29-alpine
+          imagePullPolicy: Always # safe default while a mutable tag is used
+          ports:
+            - containerPort: 8080
+              name: http
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "400m"
+              memory: "256Mi"
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12 # up to 60s to start
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 15
+            failureThreshold: 4
+            timeoutSeconds: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Keep serving while endpoint removal propagates to kube-proxy
+                # and load balancers — this is what makes rollouts zero-downtime.
+                command: ["/bin/sleep", "10"]
+          volumeMounts:
+            # Writable tmpfs mounts required by nginx with a read-only rootfs.
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+        - name: nginx-cache
+          emptyDir:
+            medium: Memory

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-web
+  namespace: staging
+  labels:
+    app: hello-web
+    env: staging
+  annotations:
+    service.kubernetes.io/topology-mode: Auto # prefer same-zone endpoints (latency + egress cost)
+spec:
+  type: ClusterIP
+  selector:
+    app: hello-web
+    env: staging
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+      appProtocol: http

@@ -1,0 +1,45 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hello-web
+  namespace: staging
+  labels:
+    app: hello-web
+    env: staging
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hello-web
+  # minReplicas >= 2: a PDB cannot protect availability with a single pod —
+  # one replica means every voluntary disruption is an outage.
+  minReplicas: 2
+  maxReplicas: 15
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown: # conservative: at most 1 pod or 10% per minute, after 5m stable
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+      selectPolicy: Min
+    scaleUp: # aggressive: react to traffic spikes immediately
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 10
+        - type: Pods
+          value: 4
+          periodSeconds: 10
+      selectPolicy: Max

@@ -1,0 +1,28 @@
+# The PDB every stateless production service should ship with.
+#
+# Why maxUnavailable (and not minAvailable)?
+#   - maxUnavailable: 1 guarantees FORWARD PROGRESS: node drains can always
+#     evict one pod at a time, upgrades never deadlock.
+#   - minAvailable percentages are evaluated against the CURRENT replica count
+#     (HPA-scaled), and round UP — with few replicas they easily become
+#     "0 disruptions allowed" and block cluster maintenance forever.
+#     The classic trap: minAvailable: 30% with 1 replica == undrainaible node.
+#
+# unhealthyPodEvictionPolicy: AlwaysAllow (stable since K8s 1.31) lets drains
+# evict pods that are Running-but-not-Ready. Without it, a crash-looping app
+# holds its PDB hostage and blocks node maintenance.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hello-web
+  namespace: staging
+  labels:
+    app: hello-web
+    env: staging
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: hello-web
+      env: staging

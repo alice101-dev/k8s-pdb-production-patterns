@@ -1,0 +1,36 @@
+# Default-deny both directions for hello-web, then allow only:
+#   ingress : port 8080 from pods in this namespace
+#   egress  : DNS (the app itself makes no outbound calls)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hello-web
+  namespace: staging
+  labels:
+    app: hello-web
+    env: staging
+spec:
+  podSelector:
+    matchLabels:
+      app: hello-web
+      env: staging
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {} # same-namespace pods only; widen deliberately if exposed via ingress/mesh
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
